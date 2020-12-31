@@ -22,6 +22,7 @@ Table of Contents
         * [upsync_timeout](#upsync_timeout)
         * [upsync_type](#upsync_type)
         * [strong_dependency](#strong_dependency)
+        * [upsync_tag](#upsync_tag)
     * [upsync_dump_path](#upsync_dump_path)
     * [upsync_lb](#upsync_lb)
     * [upstream_show](#upstream_show)
@@ -49,7 +50,7 @@ nginx-consul:
 ```nginx-consul
 http {
     upstream test {
-        upsync 127.0.0.1:8500/v1/kv/upstreams/test/ upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off;
+        upsync 127.0.0.1:8500/v1/kv/upstreams/test/ upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off upsync_tag=go;
         upsync_dump_path /usr/local/nginx/conf/servers/servers_test.conf;
 
         include /usr/local/nginx/conf/servers/servers_test.conf;
@@ -200,6 +201,10 @@ The parameters' meanings are:
 
     when strong_dependency is on, nginx will pull servers from consul/etcd every time when nginx start up or reload.
 
+* upsync_tag
+
+  pulling servers from consul with tag.
+
 [Back to TOC](#table-of-contents)       
 
 upsync_dump_path
@@ -260,19 +265,19 @@ Consul_interface
 Data can be taken from key/value store or service catalog. In the first case parameter upsync_type of directive must be *consul*. For example
 
 ```nginx-consul
-        upsync 127.0.0.1:8500/v1/kv/upstreams/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off;
+        upsync 127.0.0.1:8500/v1/kv/upstreams/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off upsync_tag=go;
 ```
 
 In the second case it must be *consul_services*.
 
 ```nginx-consul
-        upsync 127.0.0.1:8500/v1/catalog/service/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul_services strong_dependency=off;
+        upsync 127.0.0.1:8500/v1/catalog/service/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul_services strong_dependency=off upsync_tag=go;
 ```
 
 In the third case, it must be *consul_health*:
 
 ```nginx-consul
-        upsync 127.0.0.1:8500/v1/health/service/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul_health strong_dependency=off;
+        upsync 127.0.0.1:8500/v1/health/service/test upsync_timeout=6m upsync_interval=500ms upsync_type=consul_health strong_dependency=off upsync_tag=go;
 ```
 
 Services with failing health checks are marked as down with the health api.
@@ -304,6 +309,13 @@ or
     curl -X PUT -d "{\"weight\":2, \"max_fails\":2, \"fail_timeout\":10}" http://$consul_ip:$port/v1/kv/$dir1/$upstream_name/$backend_ip:$backend_port
 or
     curl -X PUT -d '{"weight":2, "max_fails":2, "fail_timeout":10}' http://$consul_ip:$port/v1/kv/$dir1/$upstream_name/$backend_ip:$backend_port
+```
+
+* set tag
+```
+    curl -X PUT -d "{\"weight\":2, \"max_fails\":2, \"fail_timeout\":10, \"tag\":\"go\"}" http://$consul_ip:$port/v1/kv/$dir1/$upstream_name/$backend_ip:$backend_port
+or
+    curl -X PUT -d '{"weight":2, "max_fails":2, "fail_timeout":10, "tag":"go"}' http://$consul_ip:$port/v1/kv/$dir1/$upstream_name/$backend_ip:$backend_port
 ```
 
 * mark server-down
@@ -369,7 +381,7 @@ check-conf:
 ```check-conf
 http {
     upstream test {
-        upsync 127.0.0.1:8500/v1/kv/upstreams/test/ upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off;
+        upsync 127.0.0.1:8500/v1/kv/upstreams/test/ upsync_timeout=6m upsync_interval=500ms upsync_type=consul strong_dependency=off upsync_tag=go;
         upsync_dump_path /usr/local/nginx/conf/servers/servers_test.conf;
 
         check interval=1000 rise=2 fall=2 timeout=3000 type=http default_down=false;
