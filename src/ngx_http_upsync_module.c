@@ -1467,7 +1467,7 @@ ngx_http_upsync_consul_parse_json(void *data)
                           "upsync_parse_json: \"weight\" value is invalid"
                           ", setting default value 1");
         } else {
-            upstream_conf->weight = (ngx_uint_t)wait;
+            upstream_conf->weight = (ngx_uint_t)weight;
         }
 
         if (max_fails < 0) {
@@ -1605,6 +1605,7 @@ ngx_http_upsync_consul_services_parse_json(void *data)
             continue;
         }
 
+        int tag_matched = 0;
         for (tag_next = tags->child; tag_next != NULL; 
              tag_next = tag_next->next) 
         {
@@ -1657,11 +1658,12 @@ ngx_http_upsync_consul_services_parse_json(void *data)
             }
 
             /* check tag */
-            if (upscf->upsync_tag.len > 0 && upscf->upsync_tag.len > 0) {
+            if (upscf->upsync_tag.len > 0 && tag_matched == 0) {
                 if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
                     upstream_conf->weight = 100;
                     upstream_conf->backup = 0;
+                    tag_matched = 1;
                 } else {
                     upstream_conf->weight = 1;
                     upstream_conf->backup = 1;
@@ -1779,7 +1781,7 @@ ngx_http_upsync_consul_health_parse_json(void *data)
         if (tags == NULL) {
             continue;
         }
-
+        int tag_matched = 0;
         for (tag_next = tags->child; tag_next != NULL;
              tag_next = tag_next->next)
         {
@@ -1832,10 +1834,11 @@ ngx_http_upsync_consul_health_parse_json(void *data)
             }
 
             /* check tag */
-            if (upscf->upsync_tag.len > 0) {
+            if (upscf->upsync_tag.len > 0 && tag_matched == 0) {
                 if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
                     upstream_conf->weight = 100;
                     upstream_conf->backup = 0;
+                    tag_matched = 1;
                 } else {
                     upstream_conf->weight = 1;
                     upstream_conf->backup = 1;
@@ -2085,7 +2088,7 @@ ngx_http_upsync_etcd_parse_json(void *data)
         }
 
         /* check tag */
-        if (upscf->upsync_tag.len > 0 && tag.data != NULL) {
+        if (upscf->upsync_tag.len > 0 && tag.len > 0) {
             if (ngx_strncasecmp(upscf->upsync_tag.data, tag.data, upscf->upsync_tag.len) == 0) {
                 ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
                 upstream_conf->weight = 100;
