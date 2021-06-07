@@ -89,6 +89,7 @@ typedef struct {
 
     ngx_str_t                        upsync_send;
     ngx_str_t                        upsync_dump_path;
+    ngx_str_t                        upsync_tag;
 
     ngx_open_file_t                 *conf_file;
 
@@ -458,6 +459,16 @@ ngx_http_upsync_server(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                                    "upsync_server: upsync_type invalid para");
                 goto invalid;
             }
+
+            continue;
+        }
+
+        if (ngx_strncmp(value[i].data, "upsync_tag=", 11) == 0) {
+            s.len = value[i].len - 11;
+            s.data = value[i].data + 11;
+
+            upscf->upsync_tag.data = s.data;
+            upscf->upsync_tag.len = s.len;
 
             continue;
         }
@@ -1262,19 +1273,22 @@ invalid:
 static ngx_int_t
 ngx_http_upsync_consul_parse_json(void *data)
 {
-    u_char                         *p;
+    u_char                         *p, *p1;
     ngx_buf_t                      *buf;
-    ngx_int_t                       max_fails=2, backup=0, down=0;
-    ngx_str_t                       src, dst;
+    ngx_int_t                       max_fails=2, backup=0, down=0, weight=1;
+    time_t                          fail_timeout = 10;
+    ngx_str_t                       src, dst, tag;
     ngx_http_upsync_ctx_t          *ctx;
     ngx_http_upsync_conf_t         *upstream_conf = NULL;
     ngx_http_upsync_server_t       *upsync_server = data;
+    ngx_http_upsync_srv_conf_t     *upscf = upsync_server->upscf;
 
     ctx = &upsync_server->ctx;
     buf = &ctx->body;
 
     src.len = 0, src.data = NULL;
     dst.len = 0, dst.data = NULL;
+    tag.len = 0, tag.data = NULL;
 
     cJSON *root = cJSON_Parse((char *)buf->pos);
     if (root == NULL) {
@@ -1296,6 +1310,17 @@ ngx_http_upsync_consul_parse_json(void *data)
     for (server_next = root->child; server_next != NULL; 
          server_next = server_next->next) 
     {
+        /* default value, server attribute */
+        weight = 1;
+        max_fails = 2;
+        fail_timeout = 10;
+        down = 0;
+        backup = 0;
+        tag.data = NULL;
+        tag.len = 0;
+        p1 = NULL;
+        p = NULL;
+
         cJSON *temp1 = cJSON_GetObjectItem(server_next, "Key");
         if (temp1 != NULL && temp1->valuestring != NULL) {
             if (ngx_http_upsync_check_key((u_char *)temp1->valuestring,
@@ -1304,13 +1329,10 @@ ngx_http_upsync_consul_parse_json(void *data)
             }
 
             p = (u_char *)ngx_strrchr(temp1->valuestring, '/');
-            upstream_conf = ngx_array_push(&ctx->upstream_conf);
-            ngx_memzero(upstream_conf, sizeof(*upstream_conf));
-            ngx_sprintf(upstream_conf->sockaddr, "%*s", ngx_strlen(p + 1), p + 1);
         }
         temp1 = NULL;
 
-        if (upstream_conf == NULL) {
+        if (p == NULL) {
             continue;
         }
 
@@ -1332,14 +1354,7 @@ ngx_http_upsync_consul_parse_json(void *data)
         }
         temp1 = NULL;
 
-        /* default value, server attribute */
-        upstream_conf->weight = 1;
-        upstream_conf->max_fails = 2;
-        upstream_conf->fail_timeout = 10;
-
-        upstream_conf->down = 0;
-        upstream_conf->backup = 0;
-
+        p1 = p;
         p = NULL;
 
         if (dst.data != NULL && dst.len != 0) {
@@ -1353,15 +1368,16 @@ ngx_http_upsync_consul_parse_json(void *data)
             }
 
             cJSON *sub_attribute = sub_root;
+
             cJSON *temp1 = cJSON_GetObjectItem(sub_attribute, "weight");
             if (temp1 != NULL) {
 
                 if (temp1->valuestring != NULL) {
-                    upstream_conf->weight = ngx_atoi((u_char *)temp1->valuestring, 
+                    weight = ngx_atoi((u_char *)temp1->valuestring,
                                             (size_t)ngx_strlen(temp1->valuestring));
 
                 } else if (temp1->valueint >= 0) {
-                    upstream_conf->weight = temp1->valueint;
+                    weight = temp1->valueint;
                 }
             }
             temp1 = NULL;
@@ -1384,11 +1400,11 @@ ngx_http_upsync_consul_parse_json(void *data)
 
                 if (temp1->valuestring != NULL) {
 
-                    upstream_conf->fail_timeout = ngx_atoi((u_char *)temp1->valuestring, 
+                    fail_timeout = ngx_atoi((u_char *)temp1->valuestring,
                                                 (size_t)ngx_strlen(temp1->valuestring));
 
                 } else if (temp1->valueint >= 0) {
-                    upstream_conf->fail_timeout = temp1->valueint;
+                    fail_timeout = temp1->valueint;
                 }
             }
             temp1 = NULL;
@@ -1419,15 +1435,39 @@ ngx_http_upsync_consul_parse_json(void *data)
             }
             temp1 = NULL;
 
+            temp1 = cJSON_GetObjectItem(sub_attribute, "tag");
+            if (temp1 != NULL) {
+
+                if (temp1->valuestring != NULL) {
+                    tag.data = (u_char *)temp1->valuestring;
+                    tag.len = ngx_strlen(temp1->valuestring);
+                }
+            }
+            temp1 = NULL;
+
             dst.len = 0;
             cJSON_Delete(sub_root);
+        } else {
+            continue;
         }
 
-        if (upstream_conf->weight <= 0) {
+        upstream_conf = ngx_array_push(&ctx->upstream_conf);
+        ngx_memzero(upstream_conf, sizeof(*upstream_conf));
+        ngx_sprintf(upstream_conf->sockaddr, "%*s", ngx_strlen(p1 + 1), p1 + 1);
+
+        /* default value, server attribute */
+        upstream_conf->weight = 1;
+        upstream_conf->max_fails = 2;
+        upstream_conf->fail_timeout = 10;
+        upstream_conf->down = 0;
+        upstream_conf->backup = 0;
+
+        if (weight <= 0) {
             ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                           "upsync_parse_json: \"weight\" value is invalid"
                           ", setting default value 1");
-            upstream_conf->weight = 1;
+        } else {
+            upstream_conf->weight = (ngx_uint_t)wait;
         }
 
         if (max_fails < 0) {
@@ -1438,11 +1478,12 @@ ngx_http_upsync_consul_parse_json(void *data)
             upstream_conf->max_fails = (ngx_uint_t)max_fails;
         }
 
-        if (upstream_conf->fail_timeout < 0) {
+        if (fail_timeout < 0) {
             ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                           "upsync_parse_json: \"fail_timeout\" value is invalid"
                           ", setting default value 10");
-            upstream_conf->fail_timeout = 10;
+        } else {
+            upstream_conf->fail_timeout = (time_t)fail_timeout;
         }
 
         if (down != 1 && down != 0) {
@@ -1461,7 +1502,17 @@ ngx_http_upsync_consul_parse_json(void *data)
             upstream_conf->backup = (ngx_uint_t)backup;
         }
 
-        max_fails=2, backup=0, down=0;
+        /* check tag */
+        if (upscf->upsync_tag.len > 0 && tag.len > 0) {
+            if (ngx_strncasecmp(upscf->upsync_tag.data, tag.data, upscf->upsync_tag.len) == 0) {
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
+                upstream_conf->weight = 100;
+                upstream_conf->backup = 0;
+            } else {
+                upstream_conf->weight = 1;
+                upstream_conf->backup = 1;
+            }
+        }
     }
     cJSON_Delete(root);
 
@@ -1476,6 +1527,7 @@ ngx_http_upsync_consul_services_parse_json(void *data)
     ngx_http_upsync_ctx_t          *ctx;
     ngx_http_upsync_conf_t         *upstream_conf = NULL;
     ngx_http_upsync_server_t       *upsync_server = data;
+    ngx_http_upsync_srv_conf_t     *upscf = upsync_server->upscf;
     ngx_int_t                       attr_value;
 
     ctx = &upsync_server->ctx;
@@ -1603,6 +1655,18 @@ ngx_http_upsync_consul_services_parse_json(void *data)
             if (ngx_strncmp(tag, "backup", 6) == 0 && tag[6] == '\0') {
                 upstream_conf->backup = 1;
             }
+
+            /* check tag */
+            if (upscf->upsync_tag.len > 0 && upscf->upsync_tag.len > 0) {
+                if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
+                    upstream_conf->weight = 100;
+                    upstream_conf->backup = 0;
+                } else {
+                    upstream_conf->weight = 1;
+                    upstream_conf->backup = 1;
+                }
+            }
         }
     }
 
@@ -1618,6 +1682,7 @@ ngx_http_upsync_consul_health_parse_json(void *data)
     ngx_http_upsync_ctx_t          *ctx;
     ngx_http_upsync_conf_t         *upstream_conf = NULL;
     ngx_http_upsync_server_t       *upsync_server = data;
+    ngx_http_upsync_srv_conf_t     *upscf = upsync_server->upscf;
     ngx_int_t                       attr_value;
 
     ctx = &upsync_server->ctx;
@@ -1765,6 +1830,17 @@ ngx_http_upsync_consul_health_parse_json(void *data)
             if (ngx_strncmp(tag, "backup", 6) == 0 && tag[6] == '\0') {
                 upstream_conf->backup = 1;
             }
+
+            /* check tag */
+            if (upscf->upsync_tag.len > 0) {
+                if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
+                    upstream_conf->weight = 100;
+                    upstream_conf->backup = 0;
+                } else {
+                    upstream_conf->weight = 1;
+                    upstream_conf->backup = 1;
+                }
+            }
         }
 
     }
@@ -1781,12 +1857,16 @@ ngx_http_upsync_etcd_parse_json(void *data)
     u_char                         *p;
     ngx_buf_t                      *buf;
     ngx_int_t                       max_fails=2, backup=0, down=0;
+    ngx_str_t                      tag;
     ngx_http_upsync_ctx_t          *ctx;
     ngx_http_upsync_conf_t         *upstream_conf = NULL;
     ngx_http_upsync_server_t       *upsync_server = data;
+    ngx_http_upsync_srv_conf_t     *upscf = upsync_server->upscf;
 
     ctx = &upsync_server->ctx;
     buf = &ctx->body;
+
+    tag.len = 0, tag.data = NULL;
 
     cJSON *root = cJSON_Parse((char *)buf->pos);
     if (root == NULL) {
@@ -1952,6 +2032,16 @@ ngx_http_upsync_etcd_parse_json(void *data)
             }
             temp1 = NULL;
 
+            temp1 = cJSON_GetObjectItem(sub_attribute, "tag");
+            if (temp1 != NULL) {
+
+                if (temp1->valuestring != NULL) {
+                    tag.data = (u_char *)temp1->valuestring;
+                    tag.len = ngx_strlen(temp1->valuestring);
+                }
+            }
+            temp1 = NULL;
+
         } else {
             continue;
         }
@@ -1994,7 +2084,21 @@ ngx_http_upsync_etcd_parse_json(void *data)
             upstream_conf->backup = (ngx_uint_t)backup;
         }
 
+        /* check tag */
+        if (upscf->upsync_tag.len > 0 && tag.data != NULL) {
+            if (ngx_strncasecmp(upscf->upsync_tag.data, tag.data, upscf->upsync_tag.len) == 0) {
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
+                upstream_conf->weight = 100;
+                upstream_conf->backup = 0;
+            } else {
+                upstream_conf->weight = 1;
+                upstream_conf->backup = 1;
+            }
+        }
+
         max_fails=2, backup=0, down=0;
+        tag.data = NULL;
+        tag.len = 0;
     }
     cJSON_Delete(root);
 
@@ -2700,8 +2804,8 @@ ngx_http_upsync_send_handler(ngx_event_t *event)
         || upsync_type_conf->upsync_type == NGX_HTTP_UPSYNC_CONSUL_HEALTH)
     {
         ngx_sprintf(request, "GET %V?recurse&index=%uL HTTP/1.0\r\nHost: %V\r\n"
-                    "Accept: */*\r\n\r\n", 
-                    &upscf->upsync_send, upsync_server->index, 
+                    "Accept: */*\r\n\r\n",
+                    &upscf->upsync_send, upsync_server->index,
                     &upscf->upsync_host);
     }
 
@@ -3793,8 +3897,8 @@ ngx_http_client_send(ngx_http_conf_client *client,
         || upsync_type_conf->upsync_type == NGX_HTTP_UPSYNC_CONSUL_HEALTH)
     {
         ngx_sprintf(request, "GET %V?recurse&index=%uL HTTP/1.0\r\nHost: %V\r\n"
-                    "Accept: */*\r\n\r\n", 
-                    &upscf->upsync_send, upsync_server->index, 
+                    "Accept: */*\r\n\r\n",
+                    &upscf->upsync_send, upsync_server->index,
                     &upscf->conf_server.name);
     }
 
