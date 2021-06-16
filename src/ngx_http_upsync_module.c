@@ -38,6 +38,7 @@ typedef struct {
 #define NGX_HTTP_UPSYNC_CONSUL_SERVICES      0x0002
 #define NGX_HTTP_UPSYNC_CONSUL_HEALTH        0x0003
 #define NGX_HTTP_UPSYNC_ETCD                 0x0004
+#define NGX_MAX_WEIGHT                       1000000
 
 
 typedef ngx_int_t (*ngx_http_upsync_packet_init_pt)
@@ -1505,9 +1506,9 @@ ngx_http_upsync_consul_parse_json(void *data)
         /* check tag */
         if (upscf->upsync_tag.len > 0 && tag.len > 0) {
             if (ngx_strncasecmp(upscf->upsync_tag.data, tag.data, upscf->upsync_tag.len) == 0) {
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
-                upstream_conf->weight = 100;
+                upstream_conf->weight = NGX_MAX_WEIGHT;
                 upstream_conf->backup = 0;
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag, server: %s", upstream_conf->sockaddr);
             } else {
                 upstream_conf->weight = 1;
                 upstream_conf->backup = 1;
@@ -1660,10 +1661,10 @@ ngx_http_upsync_consul_services_parse_json(void *data)
             /* check tag */
             if (upscf->upsync_tag.len > 0 && tag_matched == 0) {
                 if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
-                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
-                    upstream_conf->weight = 100;
+                    upstream_conf->weight = NGX_MAX_WEIGHT;
                     upstream_conf->backup = 0;
                     tag_matched = 1;
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag, server: %s", upstream_conf->sockaddr);
                 } else {
                     upstream_conf->weight = 1;
                     upstream_conf->backup = 1;
@@ -1836,9 +1837,10 @@ ngx_http_upsync_consul_health_parse_json(void *data)
             /* check tag */
             if (upscf->upsync_tag.len > 0 && tag_matched == 0) {
                 if (ngx_strncasecmp(upscf->upsync_tag.data, tag, upscf->upsync_tag.len) == 0) {
-                    upstream_conf->weight = 100;
+                    upstream_conf->weight = NGX_MAX_WEIGHT;
                     upstream_conf->backup = 0;
                     tag_matched = 1;
+                    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag, server: %s", upstream_conf->sockaddr);
                 } else {
                     upstream_conf->weight = 1;
                     upstream_conf->backup = 1;
@@ -2090,9 +2092,9 @@ ngx_http_upsync_etcd_parse_json(void *data)
         /* check tag */
         if (upscf->upsync_tag.len > 0 && tag.len > 0) {
             if (ngx_strncasecmp(upscf->upsync_tag.data, tag.data, upscf->upsync_tag.len) == 0) {
-                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag");
-                upstream_conf->weight = 100;
+                upstream_conf->weight = NGX_MAX_WEIGHT;
                 upstream_conf->backup = 0;
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "find tag, server: %s", upstream_conf->sockaddr);
             } else {
                 upstream_conf->weight = 1;
                 upstream_conf->backup = 1;
